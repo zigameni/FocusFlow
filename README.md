@@ -27,6 +27,15 @@ A customizable speed reading application built with Python and Tkinter that help
 - Responsive design that adapts to window size
 - Dark theme for reduced eye strain
 
+
+## Screenshots
+
+Here are some screenshots showcasing the Speed Reader application:
+
+<div align="center">  <img src="Screenshot1.png" alt="Control Panel" width="400">  
+<img src="Screenshot2.png" alt="Reading Mode" width="400">
+</div>
+
 ## Installation
 
 1. Ensure you have Python 3.6 or later installed on your system.
