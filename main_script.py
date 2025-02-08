@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 import time
 import threading
+import re
+
 
 class SpeedReader:
     def __init__(self, root):
@@ -10,43 +12,183 @@ class SpeedReader:
         self.root.geometry("800x600")
         self.root.configure(bg="#2E3440")
         
+        # Reading configuration
         self.text = ""
         self.wpm = 300
         self.words_per_chunk = 1
         self.running = False
         self.paused = False
         self.progress = 0
+        self.base_delay = 60 / self.wpm
         
-        # Create frames for different states
+        # Animation configuration
+        self.fade_steps = 10  # Number of opacity steps for fade effect
+        
+        # Punctuation delays (multiplier of base delay)
+        self.punctuation_delays = {
+            '.': 2.0, '!': 2.0, '?': 2.0,
+            ',': 1.5, ';': 1.5, ':': 1.5,
+            '-': 1.2, '(': 1.2, ')': 1.2
+        }
+        
         self.setup_frames()
         self.setup_ui()
+        self.root.bind('<Configure>', self.on_window_resize)
         
     def setup_frames(self):
         self.reading_frame = tk.Frame(self.root, bg="#2E3440")
         self.control_frame = tk.Frame(self.root, bg="#2E3440")
-        
+            
     def setup_ui(self):
         self.setup_reading_frame()
         self.setup_control_frame()
         self.show_control_frame()
         
-    def setup_reading_frame(self):
-        self.word_display = tk.Label(self.reading_frame, text="", 
-                                   font=("Arial", 48, "bold"),
-                                   bg="#2E3440", fg="#88C0D0")
-        self.word_display.pack(expand=True, pady=50)
         
+    def setup_reading_frame(self):
+        # Container for the reading display
+        self.display_container = tk.Frame(self.reading_frame, bg="#2E3440")
+        self.display_container.pack(expand=True, fill=tk.BOTH)
+
+        # Create a vertical container for the text rows
+        self.text_container = tk.Frame(self.display_container, bg="#2E3440")
+        self.text_container.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Create three rows with minimal spacing
+        self.text_rows = []
+        colors = ["#4C566A", "#88C0D0", "#4C566A"]  # Dimmed, Bright, Dimmed
+
+        for i in range(3):
+            label = tk.Label(self.text_container, text="",
+                            font=("Arial", 48, "bold"),
+                            bg="#2E3440", fg=colors[i],
+                            justify=tk.CENTER)
+            label.pack(pady=5)  # Adjust pady to control spacing between rows
+            self.text_rows.append(label)
+
+        # Control buttons
         reading_buttons = tk.Frame(self.reading_frame, bg="#2E3440")
         reading_buttons.pack(side=tk.BOTTOM, pady=20)
-        
-        self.reading_pause_button = ttk.Button(reading_buttons, text="Pause", 
+
+        self.reading_pause_button = ttk.Button(reading_buttons, text="Pause",
                                              command=self.pause_reading)
         self.reading_pause_button.pack(side=tk.LEFT, padx=5)
-        
-        self.reading_stop_button = ttk.Button(reading_buttons, text="Stop", 
+
+        self.reading_stop_button = ttk.Button(reading_buttons, text="Stop",
                                             command=self.stop_reading)
         self.reading_stop_button.pack(side=tk.LEFT, padx=5)
+    
+    def update_display(self, prev_word, current_word, next_word):
+        # Update all three rows
+        self.text_rows[0].config(text=prev_word if prev_word else "")
+        self.text_rows[1].config(text=current_word)
+        self.text_rows[2].config(text=next_word if next_word else "")
+
+        # Ensure text fits within window width
+        for i, row in enumerate(self.text_rows):
+            text = row.cget("text")
+            if text:
+                label_width = len(text) * self.get_font_size(row)
+                if label_width > self.root.winfo_width() * 0.8:
+                    # If text is too long, reduce font size
+                    new_size = int(self.root.winfo_width() * 0.8 / len(text))
+                    new_size = max(12, min(new_size, 72))
+                    row.configure(font=("Arial", new_size, "bold"))
+
+    def get_word_chunk(self, index, chunk_size, words):
+        if index < 0 or index >= len(words):
+            return ""
+        end = min(index + chunk_size, len(words))
+        return " ".join(words[index:end])
+    
+    def get_font_size(self, label):
+        font = label.cget("font")
+        if font:
+            return int(font.split()[1])
+        return 0
+    
+    def on_window_resize(self, event):
+        if event.widget == self.root:
+            window_width = event.width
+            window_height = event.height
+            
+            # Calculate new font size based on window dimensions
+            max_font_size = min(72, max(24, int(min(window_width / 25, window_height / 8))))
+            
+            # Ensure text fits within the window width
+            max_word_width = max(len(word) for word in self.words) if hasattr(self, 'words') else 10
+            max_font_size = min(max_font_size, int((window_width * 0.8) / max_word_width))
+            
+            # Update font sizes for all rows
+            for row in self.text_rows:
+                row.configure(font=("Arial", max_font_size, "bold"))
+    
+    def preprocess_text(self, text):
+        # Convert numbers to words if they're relatively simple
+        def number_to_words(match):
+            num = match.group(0)
+            try:
+                n = int(num)
+                if 0 <= n <= 999:  # Only convert "simple" numbers
+                    return num  # For now, keeping numbers as is
+                return num
+            except:
+                return num
         
+        # Replace numbers with words
+        text = re.sub(r'\b\d+\b', number_to_words, text)
+        
+        # Add spaces around special characters for better reading
+        text = re.sub(r'([^\w\s])', r' \1 ', text)
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        return text
+    
+    def calculate_word_delay(self, word):
+        delay = self.base_delay * self.words_per_chunk  # Adjust delay for multiple words
+        
+        # Adjust for word length
+        if len(word) > 8:
+            delay *= 1.5
+        elif len(word) > 6:
+            delay *= 1.25
+        
+        # Check for punctuation
+        for punct, mult in self.punctuation_delays.items():
+            if punct in word:
+                delay *= mult
+                break
+        
+        return delay
+
+
+    def format_word_with_focus(self, word):
+        # Find the optimal focus point (roughly 1/3 into the word)
+        length = len(word)
+        focus_index = max(1, min(length - 1, length // 3))
+        
+        # Split the word into parts
+        before_focus = word[:focus_index]
+        focus_char = word[focus_index]
+        after_focus = word[focus_index + 1:]
+        
+        return before_focus, focus_char, after_focus
+    
+    
+    def update_word_display(self, word):
+        # Format word with focus point
+        before, focus, after = self.format_word_with_focus(word)
+        
+        # Update display with formatted word
+        display_text = f"{before}{focus}{after}"
+        self.word_display.config(text=display_text)
+        
+        # Position focus point indicator above the focus character
+        # (This is approximate since we're using a monospace font)
+        self.focus_point.pack_configure(pady=(0, self.word_display.winfo_height() // 8))
+    
     def setup_control_frame(self):
         self.label = tk.Label(self.control_frame, text="Speed Reader", 
                             font=("Arial", 24, "bold"), bg="#2E3440", fg="#D8DEE9")
@@ -142,11 +284,7 @@ class SpeedReader:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load file: {str(e)}")
     
-    def get_word_chunk(self, index, chunk_size):
-        words = self.text.split()
-        start = index
-        end = min(start + chunk_size, len(words))
-        return " ".join(words[start:end])
+    
     
     def update_time_remaining(self, words_remaining):
         minutes_remaining = (words_remaining / self.words_per_chunk) * (60 / self.wpm)
@@ -187,7 +325,8 @@ class SpeedReader:
     def stop_reading(self):
         self.running = False
         self.paused = False
-        self.word_display.config(text="")
+        # Remove the line below
+        # self.word_display.config(text="")
         self.progress_bar["value"] = 0
         self.time_label.config(text="Time remaining: 0:00")
         self.reading_pause_button.config(text="Pause")
@@ -195,8 +334,9 @@ class SpeedReader:
         self.show_control_frame()
     
     def run_reader(self):
-        delay = 60 / self.wpm
-        total_words = len(self.text.split())
+        text = self.preprocess_text(self.text)
+        self.words = text.split()
+        total_words = len(self.words)
         
         while self.current_word_index < total_words:
             if not self.running:
@@ -204,15 +344,28 @@ class SpeedReader:
             if self.paused:
                 time.sleep(0.1)
                 continue
-                
-            chunk = self.get_word_chunk(self.current_word_index, self.words_per_chunk)
-            self.word_display.config(text=chunk)
+            
+            # Get previous, current, and next chunks
+            prev_chunk = self.get_word_chunk(self.current_word_index - self.words_per_chunk, 
+                                           self.words_per_chunk, self.words)
+            current_chunk = self.get_word_chunk(self.current_word_index, 
+                                              self.words_per_chunk, self.words)
+            next_chunk = self.get_word_chunk(self.current_word_index + self.words_per_chunk, 
+                                           self.words_per_chunk, self.words)
+            
+            # Update display with all three chunks
+            self.update_display(prev_chunk, current_chunk, next_chunk)
+            
+            # Update progress
             self.progress_bar["value"] = self.current_word_index
             self.update_time_remaining(total_words - self.current_word_index)
             
+            # Calculate delay based on the word characteristics
+            delay = self.calculate_word_delay(current_chunk)
+            
             self.current_word_index += self.words_per_chunk
             time.sleep(delay)
-            
+        
         if self.running:
             self.stop_reading()
 
