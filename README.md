@@ -1,4 +1,4 @@
-# Speed Reader
+# Speed Reader (FocusFlow)
 
 A customizable speed reading application built with Python and Tkinter that helps users improve their reading speed while maintaining comprehension.
 
